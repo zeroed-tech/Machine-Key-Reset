@@ -1,17 +1,24 @@
 <#
 .SYNOPSIS
-The Zeroed.Tech IIS Machine Key Auditer
+The Zeroed.Tech IIS Machine Key resetter
 
 .DESCRIPTION
-Identifies all generated IIS machine keys and logs their generation dates and paths.
+Identifies all generated IIS machine keys and deletes them
 By running this script, you are acknowledging that you've taken a backup of this host.
 Zeroed.Tech takes no responsibility if things go wrong.
 
 .EXAMPLE
-.\IIS-Machine-Key-Audit.ps1
-.\IIS-Machine-Key-Audit.ps1 | Format-Table
-.\IIS-Machine-Key-Audit.ps1 | Select ApplicationPool, UserName, MachineKeyFound,Created,Path | Format-Table
+.\IIS-Machine-Key-Reset.ps1 -accept
 #>
+
+param (
+    [switch]$accept = $false
+)
+
+if (!$accept) {
+    Write-Host "Please run with -accept after confirming you have backedup/snapshotted your server"
+    return
+}
 
 $ErrorActionPreference = 'Continue'
 Import-Module IISAdministration
@@ -65,20 +72,26 @@ function GetIISMachineKeyLocationForApplicationPool($applicationPool) {
                 # Confirm key is present, Throws an exception if not/we can't access it
                 Get-ChildItem -Path $keyLocation -ErrorAction Stop | Out-Null
 
+                
                 $keyTime = [datetime]::fromfiletime([System.BitConverter]::ToInt64([byte[]](Get-ItemPropertyValue -Path "$keyLocation\CupdTime" -Name "(Default)"), 0))
-                    
+
+                Remove-Item $keyLocation -Force -Recurse
                 return [pscustomobject]@{
-                    Path = $keyLocation
-                    Date = $keyTime
+                    Path    = $keyLocation
+                    Date    = $keyTime
+                    Deleted = $true
                 }
+                
             }
             catch [System.Security.SecurityException] {
                 Write-Error "Permission denied whilst accessing $keyLocation. Please rerun as an SYSTEM"
             }
             catch [System.Management.Automation.ItemNotFoundException] {
                 # Not found
-                return null;
+                return $null;
             }
+            
+            return $null
         }
         Default {
             New-PSDrive -Name HKU -PSProvider Registry -Root HKEY_USERS | Out-Null
@@ -87,7 +100,7 @@ function GetIISMachineKeyLocationForApplicationPool($applicationPool) {
             $profileMounted = $false;
             $sid = GetSidForApplicationPool($applicationPool)
             $keyLocation = "HKU:\$sid\Software\Microsoft\ASP.NET\4.0.30319.0"
-            $keyTime = $null
+            $result = $null
             
             if (!(Test-Path -Path "HKU:\$sid")) {
                 # Registry is not mounted, check if it exists
@@ -95,9 +108,31 @@ function GetIISMachineKeyLocationForApplicationPool($applicationPool) {
                     $profileMounted = $true
                 }
             }
+
             # The profile should now be mounted
             # Check for the presence of a machine key under this profile
-            $keyTime = GetMachineKeyTimeFromKey($keyLocation)
+            if (Test-Path -Path $keyLocation) {
+                $keyTime = GetMachineKeyTimeFromKey($keyLocation)
+                Remove-Item $keyLocation -Force
+                $result = [pscustomobject]@{
+                    Path    = $keyLocation
+                    Date    = $keyTime
+                    Deleted = $true
+                }
+            }
+            else {
+                # A user profile could not be found or a machine key could not be found within it, check under the local machine key
+                $keyLocation = "HKLM:\SOFTWARE\Microsoft\ASP.NET\4.0.30319.0\AutoGenKeys\$sid"
+                if (Test-Path -Path $keyLocation) {
+                    $keyTime = GetMachineKeyTimeFromKey($keyLocation)
+                    Remove-Item $keyLocation -Force
+                    $result = [pscustomobject]@{
+                        Path    = $keyLocation
+                        Date    = $keyTime
+                        Deleted = $true
+                    }
+                }   
+            }
             
             Remove-PSDrive -Name HKU -PSProvider Registry
             if ($profileMounted) {
@@ -105,27 +140,10 @@ function GetIISMachineKeyLocationForApplicationPool($applicationPool) {
                 UnmountRegistryForSid($sid);
             }
 
-            # If we found a key, return it
-            if ($null -ne $keyTime) {
-                return [pscustomobject]@{
-                    Path = $keyLocation
-                    Date = $keyTime
-                }
-            }
-            
-            # A user profile could not be found or a machine key could not be found within it, check under the local machine key
-            $keyLocation = "HKLM:\SOFTWARE\Microsoft\ASP.NET\4.0.30319.0\AutoGenKeys\$sid"
-            $keyTime = GetMachineKeyTimeFromKey($keyLocation)
-            if ($null -ne $keyTime) {
-                return [pscustomobject]@{
-                    Path = $keyLocation
-                    Date = $keyTime
-                }
-            }
-
-            return $null
+            return $result
         }
     }
+    return $null
 }
 
 function GetMachineKeyTimeFromKey($key) {
@@ -136,7 +154,6 @@ function GetMachineKeyTimeFromKey($key) {
             # Now that we know theres a machine key present, pull out its timestamp
             $keyTime = Get-ItemPropertyValue -Path $keyLocation -Name "AutoGenKeyCreationTime"
             return [datetime]::fromfiletime($keyTime)
-            
         }
         catch {
         }
@@ -185,10 +202,8 @@ Get-IISAppPool | ForEach-Object {
 
     [pscustomobject]@{
         ApplicationPool = $appPool.Name
-        UserName        = GetUsernameForApplicationPool($appPool)
-        SID             = GetSidForApplicationPool($appPool)
-        MachineKeyFound = $($iisMachineKey -ne $null)
         Created         = $iisMachineKey.Date
-        Path            = $iisMachineKey.Path
+        Deleted         = $iisMachineKey.Deleted
+        Path            = $iisMachineKey.Path        
     }
-}
+} | Format-Table

@@ -77,7 +77,7 @@ function GetIISMachineKeyLocationForApplicationPool($applicationPool) {
             }
             catch [System.Management.Automation.ItemNotFoundException] {
                 # Not found
-                return null;
+                return $null;
             }
         }
         Default {

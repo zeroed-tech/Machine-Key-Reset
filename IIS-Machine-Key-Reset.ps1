@@ -73,7 +73,7 @@ function GetIISMachineKeyLocationForApplicationPool($applicationPool) {
                 Get-ChildItem -Path $keyLocation -ErrorAction Stop | Out-Null
 
                 
-                $keyTime = [datetime]::fromfiletime([System.BitConverter]::ToInt64([byte[]](Get-ItemPropertyValue -Path "$keyLocation\CupdTime" -Name "(Default)"), 0))
+                $keyTime = [datetime]::FromFileTimeUtc([System.BitConverter]::ToInt64([byte[]](Get-ItemPropertyValue -Path "$keyLocation\CupdTime" -Name "(Default)"), 0))
 
                 Remove-Item $keyLocation -Force -Recurse
                 return [pscustomobject]@{
@@ -153,7 +153,7 @@ function GetMachineKeyTimeFromKey($key) {
             Get-ItemProperty -Path $keyLocation | Select-Object -ExpandProperty "AutoGenKeyV4" -ErrorAction Stop | Out-Null
             # Now that we know theres a machine key present, pull out its timestamp
             $keyTime = Get-ItemPropertyValue -Path $keyLocation -Name "AutoGenKeyCreationTime"
-            return [datetime]::fromfiletime($keyTime)
+            return [datetime]::FromFileTimeUtc($keyTime)
         }
         catch {
         }
@@ -202,8 +202,11 @@ Get-IISAppPool | ForEach-Object {
 
     [pscustomobject]@{
         ApplicationPool = $appPool.Name
+        MachineKeyFound = $($iisMachineKey -ne $null)
         Created         = $iisMachineKey.Date
         Deleted         = $iisMachineKey.Deleted
         Path            = $iisMachineKey.Path        
     }
 } | Format-Table
+
+Write-Host "IIS machine keys have been deleted. Please run 'iisreset' or restart this host to genearte new keys"

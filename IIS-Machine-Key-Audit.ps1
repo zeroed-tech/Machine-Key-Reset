@@ -65,7 +65,7 @@ function GetIISMachineKeyLocationForApplicationPool($applicationPool) {
                 # Confirm key is present, Throws an exception if not/we can't access it
                 Get-ChildItem -Path $keyLocation -ErrorAction Stop | Out-Null
 
-                $keyTime = [datetime]::fromfiletime([System.BitConverter]::ToInt64([byte[]](Get-ItemPropertyValue -Path "$keyLocation\CupdTime" -Name "(Default)"), 0))
+                $keyTime = [datetime]::FromFileTimeUtc([System.BitConverter]::ToInt64([byte[]](Get-ItemPropertyValue -Path "$keyLocation\CupdTime" -Name "(Default)"), 0))
                     
                 return [pscustomobject]@{
                     Path = $keyLocation
@@ -135,7 +135,7 @@ function GetMachineKeyTimeFromKey($key) {
             Get-ItemProperty -Path $keyLocation | Select-Object -ExpandProperty "AutoGenKeyV4" -ErrorAction Stop | Out-Null
             # Now that we know theres a machine key present, pull out its timestamp
             $keyTime = Get-ItemPropertyValue -Path $keyLocation -Name "AutoGenKeyCreationTime"
-            return [datetime]::fromfiletime($keyTime)
+            return [datetime]::FromFileTimeUtc($keyTime)
             
         }
         catch {
